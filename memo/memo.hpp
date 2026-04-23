@@ -4,6 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <typeinfo>
 #include "event.h"
 
 inline std::string CustomNotifyLateEvent::GetNotification(int n) const {
@@ -11,45 +12,61 @@ inline std::string CustomNotifyLateEvent::GetNotification(int n) const {
 }
 
 class Memo {
+  struct EventInfo {
+    const Event* event;
+    int type; // 0: Normal, 1: Before, 2: Late
+    int param; // notify_time or frequency
+  };
+
  public:
   Memo() = delete;
 
-  Memo(int duration) : duration_(duration), current_hour_(0) {}
+  Memo(int duration) : duration_(duration), current_hour_(0) {
+    events_.reserve(1000);
+  }
 
   ~Memo() {}
 
   void AddEvent(const Event *event) {
-    events_.push_back(event);
+    EventInfo info;
+    info.event = event;
+    if (const auto* nb = dynamic_cast<const NotifyBeforeEvent*>(event)) {
+      info.type = 1;
+      info.param = nb->GetNotifyTime();
+    } else if (const auto* nl = dynamic_cast<const NotifyLateEvent*>(event)) {
+      info.type = 2;
+      info.param = nl->GetFrequency();
+    } else {
+      info.type = 0;
+      info.param = 0;
+    }
+    events_.push_back(info);
   }
 
   void Tick() {
     current_hour_++;
     if (current_hour_ > duration_) return;
 
-    for (const auto* event : events_) {
-      if (event->IsComplete()) continue;
+    for (const auto& info : events_) {
+      if (info.event->IsComplete()) continue;
 
-      int deadline = event->GetDeadline();
+      int deadline = info.event->GetDeadline();
 
-      // We need to identify the type of event to know when to notify.
-      if (const auto* nb = dynamic_cast<const NotifyBeforeEvent*>(event)) {
-        int notify_time = nb->GetNotifyTime();
-        if (current_hour_ == deadline - notify_time) {
-          std::cout << event->GetNotification(0) << std::endl;
+      if (info.type == 1) { // NotifyBeforeEvent
+        if (current_hour_ == deadline - info.param) {
+          std::cout << info.event->GetNotification(0) << "\n";
         } else if (current_hour_ == deadline) {
-          std::cout << event->GetNotification(1) << std::endl;
+          std::cout << info.event->GetNotification(1) << "\n";
         }
-      } else if (const auto* nl = dynamic_cast<const NotifyLateEvent*>(event)) {
-        int frequency = nl->GetFrequency();
+      } else if (info.type == 2) { // NotifyLateEvent
         if (current_hour_ == deadline) {
-          std::cout << event->GetNotification(0) << std::endl;
-        } else if (current_hour_ > deadline && (current_hour_ - deadline) % frequency == 0) {
-          std::cout << event->GetNotification((current_hour_ - deadline) / frequency) << std::endl;
+          std::cout << info.event->GetNotification(0) << "\n";
+        } else if (current_hour_ > deadline && (current_hour_ - deadline) % info.param == 0) {
+          std::cout << info.event->GetNotification((current_hour_ - deadline) / info.param) << "\n";
         }
-      } else {
-        // NormalEvent
+      } else { // NormalEvent
         if (current_hour_ == deadline) {
-          std::cout << event->GetNotification(0) << std::endl;
+          std::cout << info.event->GetNotification(0) << "\n";
         }
       }
     }
@@ -58,6 +75,6 @@ class Memo {
  private:
   int duration_;
   int current_hour_;
-  std::vector<const Event*> events_;
+  std::vector<EventInfo> events_;
 };
 #endif
