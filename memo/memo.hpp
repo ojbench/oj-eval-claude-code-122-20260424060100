@@ -4,8 +4,6 @@
 #include <iostream>
 #include <vector>
 #include <string>
-#include <queue>
-#include <functional>
 #include "event.h"
 
 inline std::string CustomNotifyLateEvent::GetNotification(int n) const {
@@ -13,17 +11,6 @@ inline std::string CustomNotifyLateEvent::GetNotification(int n) const {
 }
 
 class Memo {
-  struct ScheduledItem {
-    int hour;
-    int event_idx;
-    int n;
-
-    bool operator>(const ScheduledItem& other) const {
-      if (hour != other.hour) return hour > other.hour;
-      return event_idx > other.event_idx;
-    }
-  };
-
   struct EventInfo {
     const Event* event;
     int type; // 0: Normal, 1: Before, 2: Late
@@ -34,7 +21,7 @@ class Memo {
   Memo() = delete;
 
   Memo(int duration) : duration_(duration), current_hour_(0) {
-    std::ios::sync_with_stdio(false);
+    events_.reserve(1000);
   }
 
   ~Memo() {}
@@ -42,64 +29,43 @@ class Memo {
   void AddEvent(const Event *event) {
     EventInfo info;
     info.event = event;
-    int deadline = event->GetDeadline();
-    int idx = static_cast<int>(events_.size());
-
     if (const auto* nb = dynamic_cast<const NotifyBeforeEvent*>(event)) {
       info.type = 1;
       info.param = nb->GetNotifyTime();
-      events_.push_back(info);
-
-      int t1 = deadline - info.param;
-      if (t1 > current_hour_ && t1 <= duration_) {
-        pq_.push({t1, idx, 0});
-      }
-      if (deadline > current_hour_ && deadline <= duration_) {
-        pq_.push({deadline, idx, 1});
-      }
     } else if (const auto* nl = dynamic_cast<const NotifyLateEvent*>(event)) {
       info.type = 2;
       info.param = nl->GetFrequency();
-      events_.push_back(info);
-
-      if (deadline > current_hour_) {
-        if (deadline <= duration_) {
-          pq_.push({deadline, idx, 0});
-        }
-      } else {
-        int n = (current_hour_ - deadline) / info.param + 1;
-        int t = deadline + n * info.param;
-        if (t <= duration_) {
-          pq_.push({t, idx, n});
-        }
-      }
     } else {
       info.type = 0;
       info.param = 0;
-      events_.push_back(info);
-
-      if (deadline > current_hour_ && deadline <= duration_) {
-        pq_.push({deadline, idx, 0});
-      }
     }
+    events_.push_back(info);
   }
 
   void Tick() {
     current_hour_++;
     if (current_hour_ > duration_) return;
 
-    while (!pq_.empty() && pq_.top().hour == current_hour_) {
-      ScheduledItem item = pq_.top();
-      pq_.pop();
+    for (const auto& info : events_) {
+      if (info.event->IsComplete()) continue;
 
-      if (!events_[item.event_idx].event->IsComplete()) {
-        std::cout << events_[item.event_idx].event->GetNotification(item.n) << "\n";
+      int deadline = info.event->GetDeadline();
 
-        if (events_[item.event_idx].type == 2) { // Late
-          int next_hour = current_hour_ + events_[item.event_idx].param;
-          if (next_hour <= duration_) {
-            pq_.push({next_hour, item.event_idx, item.n + 1});
-          }
+      if (info.type == 1) { // NotifyBeforeEvent
+        if (current_hour_ == info.param) {
+          std::cout << info.event->GetNotification(0) << "\n";
+        } else if (current_hour_ == deadline) {
+          std::cout << info.event->GetNotification(1) << "\n";
+        }
+      } else if (info.type == 2) { // NotifyLateEvent
+        if (current_hour_ == deadline) {
+          std::cout << info.event->GetNotification(0) << "\n";
+        } else if (current_hour_ > deadline && (current_hour_ - deadline) % info.param == 0) {
+          std::cout << info.event->GetNotification((current_hour_ - deadline) / info.param) << "\n";
+        }
+      } else { // NormalEvent
+        if (current_hour_ == deadline) {
+          std::cout << info.event->GetNotification(0) << "\n";
         }
       }
     }
@@ -109,6 +75,5 @@ class Memo {
   int duration_;
   int current_hour_;
   std::vector<EventInfo> events_;
-  std::priority_queue<ScheduledItem, std::vector<ScheduledItem>, std::greater<ScheduledItem>> pq_;
 };
 #endif
